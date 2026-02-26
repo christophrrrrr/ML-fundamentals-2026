@@ -1,0 +1,6 @@
+__pycache__/
+.ipynb_checkpoints/
+pdf_text.txt
+extract_pdf.py
+assignment_1_name_surname*
+*.nbconvert.ipynb
