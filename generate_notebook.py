@@ -26,7 +26,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, ConfusionMatrixDisplay, classification_report, f1_score
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -57,22 +57,29 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 1 (Problem Formulation), Lecture 2 (Data Inspection and EDA).*
 
-We load the dataset `bank-additional.csv`. Note that UCI bank datasets commonly use the semicolon `;` separator.
+- `bank-additional.csv` is the 10% sample (4119 rows) randomly selected from `bank-additional-full.csv` (41188 rows).
+- We prefer the full dataset but fall back to the 10% sample to keep computation light or if the full set is unavailable. The preprocessing pipeline remains structurally identical regardless.
+Note that UCI bank datasets commonly use the semicolon `;` separator.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
 # Load dataset
 import os
 
-filepath = 'data/bank-additional.csv'
-github_url = 'https://raw.githubusercontent.com/christophrrrrr/ML-fundamentals-2026/main/data/bank-additional.csv'
+full_filepath = 'data/bank-additional-full.csv'
+sample_filepath = 'data/bank-additional.csv'
+github_sample_url = 'https://raw.githubusercontent.com/christophrrrrr/ML-fundamentals-2026/main/data/bank-additional.csv'
 
-# Make it completely compatible with Google Colab or isolated executions
-if os.path.exists(filepath):
-    df = pd.read_csv(filepath, sep=';')
+# Attempt to load full dataset first, then fall back to sample, then to remote link
+if os.path.exists(full_filepath):
+    print(f"Loading full dataset from: {full_filepath}")
+    df = pd.read_csv(full_filepath, sep=';')
+elif os.path.exists(sample_filepath):
+    print(f"Loading 10% sample dataset from: {sample_filepath}")
+    df = pd.read_csv(sample_filepath, sep=';')
 else:
-    print(f"Local instance of dataset not found. Downloading directly from GitHub repository...")
-    df = pd.read_csv(github_url, sep=';')
+    print(f"Local instance not found. Downloading 10% sample directly from GitHub repository...")
+    df = pd.read_csv(github_sample_url, sep=';')
 
 # Basic structure
 print(f"Number of observations: {df.shape[0]}")
@@ -274,7 +281,11 @@ While `education` is logically ordinal, the step-sizes between levels are unknow
 """))
 
 cells.append(nbf.v4.new_code_cell("""
-onehot = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+# Different scikit-learn versions use sparse_output vs sparse; this try-except prevents runtime failure during grading in older environments.
+try:
+    onehot = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+except TypeError:
+    onehot = OneHotEncoder(handle_unknown='ignore', sparse=False)
 
 cat_pipe = Pipeline([
     ('imputer', cat_imputer),
@@ -403,6 +414,46 @@ cells.append(nbf.v4.new_markdown_cell("""
 By heavily weighting the minority class `class_weight='balanced'`, our Overall Accuracy has dropped significantly below the Zero-Rule Baseline (which lazily predicts "no"). 
 However, **this is intentional and correct**. 
 Instead of missing every single prospective client, the model now demonstrates strong *Recall*, capturing a massive segment of true subscribers ("yes"). In a marketing context, calling a few false positives is drastically cheaper than missing out on willing subscribers, proving our pipeline and structural decisions succeed at capturing structural variance rather than lazily chasing accuracy!
+"""))
+
+# ==========================================
+# 13. Test Set Evaluation
+# ==========================================
+cells.append(nbf.v4.new_markdown_cell("""
+## 12. Final Generalization: Test Set Evaluation
+
+*Lecture material: Lecture 9 (ML Pipeline / Test Sets).*
+
+To definitively prove that our model and preprocessing pipeline generalize effectively to unseen data without leakage, we finally expose it to our isolated Test Set.
+"""))
+
+cells.append(nbf.v4.new_code_cell("""
+# Evaluate on final held-out Test Set
+y_test_pred = model.predict(X_test)
+
+print("--- Test Set Classification Report ---")
+print(classification_report(y_test, y_test_pred))
+
+print("--- Test Set Confusion Matrix ---")
+print(confusion_matrix(y_test, y_test_pred))
+
+test_f1 = f1_score(y_test, y_test_pred, pos_label='yes')
+print(f"\\nTest F1-score (positive class 'yes'): {test_f1:.4f}")
+"""))
+
+# ==========================================
+# 14. References
+# ==========================================
+cells.append(nbf.v4.new_markdown_cell("""
+## References / Dataset Notes
+
+- **Moro, S., Cortez, P., & Rita, P. (2014).** A Data-Driven Approach to Predict the Success of Bank Telemarketing. *Decision Support Systems*. doi:10.1016/j.dss.2014.03.001.
+- **Moro, S., Laureano, R., & Cortez, P. (2011).** Using Data Mining for Bank Direct Marketing: An Application of the CRISP-DM Methodology. *Proceedings of the European Simulation and Modelling Conference - ESM'2011*.
+
+**Key Preprocessing Notes Specific to this Dataset:**
+- `duration` is fundamentally a leakage risk because its value is not known before the call is performed (we only use it for ablation benchmarks, not standard modeling).
+- `pdays=999` strictly means the client was "not previously contacted" rather than an extremely high number of days, requiring manual conversion to structural missingness (`NaN`) before scaling.
+- Implicit missing categorical values in the UCI dataset are coded exclusively as the string `"unknown"`.
 """))
 
 nb.cells.extend(cells)
