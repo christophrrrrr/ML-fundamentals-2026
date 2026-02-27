@@ -13,7 +13,7 @@ cells.append(nbf.v4.new_markdown_cell("""
 GitHub Repository: [https://github.com/christophrrrrr/ML-fundamentals-2026.git](https://github.com/christophrrrrr/ML-fundamentals-2026.git)
 *(Note: Repository name must be exactly `ML-fundamentals-2026` per assignment instructions)*
 
-This notebook executes data preparation and feature engineering tasks for the UCI Bank Marketing Dataset (`bank-additional.csv`), in strict adherence to data leakage prevention principles.
+This notebook executes data preparation and feature engineering tasks for the UCI Bank Marketing Dataset (`bank-additional.csv`), adhering to data leakage prevention principles.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -28,6 +28,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, ConfusionMatrixDisplay, classification_report, f1_score
+from sklearn.feature_selection import VarianceThreshold
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -42,12 +43,13 @@ cells.append(nbf.v4.new_markdown_cell("""
 *Lecture material: Lecture 1 (Problem Formulation), Lecture 2 (Data Inspection).*
 
 **Target Selection:**
-The target variable is `y`. Upon manual inspection of the dataset description and features, `y` records `"yes"` or `"no"` indicating whether the client subscribed to a term deposit. This aligns perfectly with the stated objective of the direct marketing campaigns.
+The target variable is `y`. `y` records `"yes"` or `"no"` indicating whether the client subscribed to a term deposit. This aligns with the stated objective of the direct marketing campaigns.
 
 **Invalid Alternatives:**
-Two other variables might superficially appear to be valid targets but must not be used:
-2. `poutcome`: This records the outcome of the *previous* marketing campaign. While useful as a highly predictive feature, it is fundamentally a descriptor of a *past* event rather than the current campaign's outcome. Furthermore, because it is known at prediction time, it serves as a valid input feature, not the target to predict.
-3. `campaign`: One might assume the "number of contacts performed" is an outcome to optimize. However, this is an execution variable known during the campaign management, not the business objective (which is whether the client actually subscribed to a deposit).
+Three other variables might appear to be valid targets but must not be used:
+1. `duration`: This represents the call duration in seconds. While highly correlated with `y`, it is an outcome of the call. At prediction time (before or during the start of the call), this information is unavailable. Predicting `duration` does not address the business goal of identifying who will subscribe. Including it results in data leakage.
+2. `poutcome`: This records the outcome of the previous marketing campaign. It is a descriptor of a past event rather than the current campaign's outcome. Because it is known at prediction time, it serves as an input feature, not the target to predict.
+3. `campaign`: Records the number of contacts performed during the current campaign. One might argue this represents campaign effort worth predicting or optimizing. However, `campaign` is a campaign execution variable accumulated during the contact process — it is not the business outcome. The goal is predicting client behavior (`y`), not the number of calls made. It is also partially available at prediction time (current call count), making its use as a target conceptually incoherent.
 """))
 
 # ==========================================
@@ -152,15 +154,20 @@ print(y_pct)
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""
-**Observations:**
-- **Class Imbalance:** Only ~10.9% of clients subscribed (`yes`), meaning early handling for class imbalance will be required to prevent the model from trivializing predictions to the majority class.
-- **Skewed Variables:** `campaign` is heavily right-skewed (most clients are contacted 1-3 times, but there is a long tail of clients contacted repeatedly). `previous` is zero for the vast majority of clients, indicating most clients have never been contacted in past campaigns.
-- **Category Ratios:** `university.degree` and `high.school` dominate the `education` distribution. The majority of clients are married.
-- **Macroeconomics:** The distributions of `euribor3m` (Euro Interbank Offered Rate) and `nr.employed` are distinctly bimodal, clustering sharply rather than showing a normal distribution. `cons.price.idx` and `cons.conf.idx` also display non-normal clustering and skewness.
-- **Special Consideration Variables:** 
-    1. `duration` strongly dictates target leakage since the length of a call is only known *after* the call finishes, which violates the premise of predicting success in advance. It must be dropped.
-    2. `campaign` possesses an extreme right tail which linear models may struggle gracefully with; regularizing via standardization later will be critical.
-- **Implicit Missing Values:** Several categorical variables (like `job` or `education`) utilize the string `"unknown"` as an implicit missing value. The numerical variable `pdays` uses `999` to declare "never contacted before".
+**Macroeconomic Observations:**
+- `euribor3m` and `nr.employed` show bimodal distributions, clustering into two distinct regimes that likely correspond to pre- and post-2008 economic periods in the dataset.
+- `emp.var.rate` is similarly clustered rather than continuous, reinforcing that macroeconomic features track the same underlying economic cycle.
+- These distributions suggest the macroeconomic block may carry redundant information — addressed formally in Feature Selection.
+"""))
+
+cells.append(nbf.v4.new_markdown_cell("""
+**General Observations:**
+- **Class Imbalance:** Only ~10.9% of clients subscribed (`yes`). Class imbalance handling is required to prevent the model from trivializing predictions.
+- **Skewed Variables:** `campaign` is right-skewed (most clients are contacted 1-3 times, with a long tail). `previous` is zero for the majority of clients.
+- **Category Ratios:** `university.degree` and `high.school` represent the most frequent `education` levels. The majority of clients are married.
+- **Target Leakage Variable:** `duration` is only known after the call finishes. It must be dropped.
+- **Campaign Skew:** `campaign` possesses a right tail requiring regularization.
+- **Implicit Missing Values:** Categorical variables utilize `"unknown"` as an implicit missing value. `pdays` uses `999` to indicate "never contacted before".
 """))
 
 # ==========================================
@@ -171,46 +178,46 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 2 (Data Splitting and Leakage), Lecture 5 (Preprocessing), Lecture 9 (ML Pipeline).*
 
-To strictly prevent data leakage and abide by ML Pipeline discipline, I execute the data preparation tasks in the following sequence:
+To prevent data leakage, data preparation tasks are executed in the following sequence:
 
 1. **Identifying Target & Data Loading** (Completed above)
-    - ✅ **Allowed:** Raw dataset viewing, broad target assessment.
-    - 🚫 **Not allowed:** Predicting on or analyzing combinations of target vs features globally.
-    - ⚠️ **Leakage risk if changed:** None at this conceptual stage, as long as `duration` is dropped manually before modeling metrics run.
+    - Allowed: Raw dataset viewing, broad target assessment.
+    - Not allowed: Predicting on or analyzing combinations of target vs features globally.
+    - Leakage risk if changed: None at this stage, assuming `duration` is dropped manually before modeling metrics run.
 2. **Managing Missing Values (Identification & Structural Cleaning)**
-    - ✅ **Allowed:** Finding distinct string literals (e.g. `"unknown"`) or sentinel values (`999`) and structurally replacing them with `NaN` or indicator flags.
-    - 🚫 **Not allowed:** Computing median, mean, or mode across the column to fill the `NaN` values.
-    - ⚠️ **Leakage risk if changed:** Replacing `"unknown"` specifically does not use global distribution data. However, if *statistical* imputation were performed here instead, it would leak test-set central tendencies into the training data.
+    - Allowed: Finding distinct string literals (e.g. `"unknown"`) or sentinel values (`999`) and structurally replacing them with `NaN` or indicator flags.
+    - Not allowed: Computing median, mean, or mode across the column to fill the `NaN` values.
+    - Leakage risk if changed: Replacing `"unknown"` specifically does not use global distribution data. However, if statistical imputation were performed here instead, it would leak test-set central tendencies into the training data.
 3. **Data Splitting**
-    - ✅ **Allowed:** Raw input variables (`X`) and targets (`y`).
-    - 🚫 **Not allowed:** Any fitted statistical boundaries, encodings, or synthetic samples.
-    - ⚠️ **Leakage risk if changed:** If delayed to later in the pipeline, every transformation step ahead of it would accidentally consume information belonging strictly to the test set, compromising final evaluation integrity.
+    - Allowed: Raw input variables (`X`) and targets (`y`).
+    - Not allowed: Any fitted statistical boundaries, encodings, or synthetic samples.
+    - Leakage risk if changed: If delayed, transformation steps would consume information belonging to the test set, compromising final evaluation integrity.
 4. **Managing Missing Values (Statistical Imputation)**
-    - ✅ **Allowed:** Medians/Modes calculated strictly from `X_train`.
-    - 🚫 **Not allowed:** Test set distribution properties.
-    - ⚠️ **Leakage risk if changed:** If placed before Data Splitting, the median would include test observations.
+    - Allowed: Medians/Modes calculated from `X_train`.
+    - Not allowed: Test set distribution properties.
+    - Leakage risk if changed: If placed before Data Splitting, the median would include test observations.
 5. **Encoding Categorical Variables**
-    - ✅ **Allowed:** List of distinct categories present purely in `X_train`.
-    - 🚫 **Not allowed:** Categories that only exist in `X_test`.
-    - ⚠️ **Leakage risk if changed:** The algorithm would map dummy dimensions for categories it conceptually hasn't "seen" yet, failing in real-world scenarios where unknown inputs arrive.
+    - Allowed: List of distinct categories present in `X_train`.
+    - Not allowed: Categories that only exist in `X_test`.
+    - Leakage risk if changed: The algorithm would map dummy dimensions for categories it has not seen yet.
 6. **Feature Scaling**
-    - ✅ **Allowed:** Compute mean and variance only over `X_train` via `.fit()`.
-    - 🚫 **Not allowed:** Running `.fit()` on `X_test`.
-    - ⚠️ **Leakage risk if changed:** If placed before Data Splitting, the feature distances for the test set observations would be mathematically compressed based on training outliers (or vice versa).
+    - Allowed: Compute mean and variance only over `X_train` via `.fit()`.
+    - Not allowed: Running `.fit()` on `X_test`.
+    - Leakage risk if changed: If placed before Data Splitting, the feature distances for the test set observations would be compressed based on training outliers.
 7. **Feature Selection**
-    - ✅ **Allowed:** Variance thresholds and correlation matrices computed *over* `X_train`.
-    - 🚫 **Not allowed:** Entire dataset correlations.
-    - ⚠️ **Leakage risk if changed:** If executed upfront, we would delete variables based on how they correlate with target labels inside the pristine test set.
+    - Allowed: Variance thresholds and correlation matrices computed over `X_train`.
+    - Not allowed: Entire dataset correlations.
+    - Leakage risk if changed: If executed upfront, variables would be deleted based on how they correlate with target labels inside the test set.
 8. **Addressing Class Imbalance**
-    - ✅ **Allowed:** Resampling methods (SMOTE) or algorithmic weightings applied entirely within the training vault.
-    - 🚫 **Not allowed:** Resampling before Data Splitting.
-    - ⚠️ **Leakage risk if changed:** If SMOTE generated synthetic samples before the train/test split, synthesized points mathematically linked to train observations would bleed across the boundary and land in the test set. Recall scores would artificially inflate due to structural duplication rather than true generalization power.
+    - Allowed: Resampling methods (SMOTE) or algorithmic weightings applied within the training set.
+    - Not allowed: Resampling before Data Splitting.
+    - Leakage risk if changed: If SMOTE generated synthetic samples before the train/test split, synthesized points mathematically linked to train observations would land in the test set.
 
 **Incorrect Ordering Example (Scaling before Splitting):** 
-If we performed **Feature Scaling** before **Data Splitting**, we would calculate the mean and standard deviation across the *entire* dataset. The standardized test values would inherently contain information about the central tendency of the training set. This is a classic form of data leakage, artificially inflating the test evaluation metrics because the test data "peeked" into the global distribution.
+If Feature Scaling is performed before Data Splitting, the mean and standard deviation are calculated across the entire dataset. The standardized test values inherently contain information about the central tendency of the training set. This is data leakage.
 
 **Incorrect Ordering Example (SMOTE before Splitting):**
-If resampling like SMOTE were applied before splitting, synthetic minority samples generated from training points would overlap geometrically with validation and test set spaces, causing grossly inflated recall and precision scores on data that isn't functionally new.
+If resampling like SMOTE is applied before splitting, synthetic minority samples generated from training points overlap with validation and test set spaces.
 """))
 
 # ==========================================
@@ -235,7 +242,7 @@ cells.append(nbf.v4.new_code_cell("""
 # Count categorical 'unknown' and numerical '999' before cleaning
 missing_counts = []
 
-for col in df.select_dtypes(include=['object']).columns:
+for col in df.drop(columns=['y']).select_dtypes(include=['object']).columns:
     unknown_count = (df[col] == 'unknown').sum()
     if unknown_count > 0:
         missing_counts.append({
@@ -287,16 +294,16 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 2 (Data Splitting and Leakage), Lecture 9 (ML Pipeline).*
 
-I separate the independent features `X` and the target `y`, and perform a stratified split.
+The independent features `X` and the target `y` are separated using a stratified split.
 
 **Proportions:** 
-- Training: 70% (Used strictly to learn parameters for imputation, scaling, encoding, and modeling).
+- Training: 70% (Used to learn parameters for imputation, scaling, encoding, and modeling).
 - Validation: 15% (Used to evaluate model health during iterations and tune hyperparameters).
-- Test: 15% (Strictly held-out vault for final generalization reporting; untouched here).
+- Test: 15% (Held-out subset for final generalization reporting).
 
-**Stratification:** We use `stratify=y` because the target is highly imbalanced (~11% positives). A random split could accidentally yield a training set with very few positive examples, leading to instability.
+**Stratification:** `stratify=y` is used because the target is imbalanced (~11% positives). A random split could yield a training set with very few positive examples, leading to instability.
 
-**Leakage Prevention:** By executing this split NOW, I guarantee that upcoming steps (Scaling, Imputation, Encoding) can only `fit()` on mathematical properties isolated inside `X_train`.
+**Leakage Prevention:** Executing this split here ensures that upcoming steps (Scaling, Imputation, Encoding) can only `fit()` on mathematical properties present in `X_train`.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -324,10 +331,10 @@ print(f"X_test shape: {X_test.shape}")
 cells.append(nbf.v4.new_markdown_cell("""
 ## 6. Managing Missing Values (Part 2: Imputation)
 
-Now that data is split safely, we establish the statistical modeling logic inside `scikit-learn` Pipelines.
+The statistical modeling logic is established inside `scikit-learn` Pipelines.
 
-- **Numerical Imputation (`pdays_clean`):** `pdays_clean` exhibits extreme missingness (nearly 96% of clients were never previously contacted, meaning they possess `NaN` values here). Because we already completely captured the informational variance of "was previously contacted vs wasn't" using the binary `prev_contacted` flag in the structural cleaning phase, imputing `pdays_clean` with the Train median is essentially imputing a near-empty column with a static baseline. We retain the variable anyway because the remaining ~4% of clients who *did* have successful previous campaigns possess genuinely informative `pdays` numerical magnitudes that a linear model can extract coefficient value from. We accept the limitation that the variable is extremely sparse.
-- **Categorical Imputation:** We replace categorical `NaN` with the explicit string `"missing"`. This honors the *informative nature* of the missingness (perhaps clients who refuse to disclose `job` are empirically less likely to subscribe).
+- **Numerical Imputation (`pdays_clean`):** `pdays_clean` has 96% missing data. Because the variance of "was previously contacted vs wasn't" is captured using the binary `prev_contacted` flag, imputing `pdays_clean` with the Train median imputes a near-empty column with a static baseline. The variable is retained because the 4% of clients with previous campaigns possess numerical magnitudes that a linear model can use.
+- **Categorical Imputation:** We replace categorical `NaN` with the explicit string `"missing"`. This records missingness directly as an additional feature state.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -355,13 +362,13 @@ cells.append(nbf.v4.new_markdown_cell("""
 - **Ordinal Variables** (e.g., `education`): Intrinsic order (`basic.4y` < `high.school` < `university.degree`). 
 
 **Strategy:**
-While `education` is logically ordinal, the step-sizes between levels are unknown. A linear model assumes uniform mathematical steps in an OrdinalEncoded variable (e.g., 1 -> 2 has the exact same impact as 2 -> 3). To avoid imposing this rigid, artificial structure, I apply **One-Hot Encoding** to *all* categorical variables.
+While `education` is logically ordinal, the step-sizes between levels are unknown. A linear model assumes uniform mathematical steps in an OrdinalEncoded variable. To avoid imposing this structure, **One-Hot Encoding** is applied to all categorical variables.
 
-*Impact on Dimensionality:* Expands from ~10 categorical columns to dozens of sparse binary features.
-*Impact on Interpretability:* The Logistic Regression will yield a discrete coefficient for *each* category (e.g., `job_retired`), making it highly interpretable.
+*Impact on Dimensionality:* Expands categorical columns to binary features.
+*Impact on Interpretability:* The Logistic Regression yields a discrete coefficient for each category (e.g., `job_retired`).
 *Impact on Decision Boundaries:* Allows the linear model to form piecewise, non-linear logic through intercepts added for specific subgroups.
 
-**Data Leakage Check:** I enforce `handle_unknown='ignore'`. If the Validation set contains a category unseen in Train, it ignores it rather than crashing, preventing leakage.
+**Data Leakage Check:** `handle_unknown='ignore'` is enforced so that if the Validation set contains a category unseen in Train, it is ignored, preventing leakage.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -373,7 +380,7 @@ print(f"Theoretical Ordinal Hierarchy for Education:\\n{education_order}")
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""
-While `OrdinalEncoder` mapping `[0, 1, 2, ... 7]` perfectly represents the hierarchical nature shown above, we strictly abstain from doing so for our Logistic Regression. A linear algorithm would mathematically presume the difference in marketing susceptibility between `illiterate` (0) and `basic.4y` (1) is perfectly identical to the distance between `professional.course` (5) and `university.degree` (6). Because that assumption is extremely dangerous in socioeconomic data, One-Hot Encoding acts as the safer, non-parametric alternative.
+`OrdinalEncoder` maps qualitative inputs to an integer space `[0, 1, 2, ... 7]`. A linear algorithm presumes the difference in value between `0` and `1` is identical to the distance between `5` and `6`. Because this assumption does not hold for socioeconomic levels, One-Hot Encoding acts as a non-parametric alternative.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -398,12 +405,12 @@ cells.append(nbf.v4.new_markdown_cell("""
 *Lecture material: Lecture 5 (Feature Scaling), Lecture 6 (Logistic Regression).*
 
 **Strategy:**
-I apply **Standardization** (`StandardScaler`) to all numerical features.
+**Standardization** (`StandardScaler`) is applied to all numerical features.
 
 **Justification for Logistic Regression:**
-- *Gradient Optimization:* Logistic regression loss surfaces (binary cross-entropy) converge much faster using gradient descent/lbfgs when features are centered and share similar variances.
-- *Regularization:* `scikit-learn`'s LogisticRegression includes L2 regularization by default. L2 drastically punishes variables with large magnitudes. If an unscaled feature spans $[0, 5000]$ (`nr.employed`), it will artificially shrink its coefficient. Scaling puts all features on the same numerical ground, normalizing the L2 penalty evenly.
-- *Comparability:* Standardizing transforms coefficients into directly comparable "feature importances".
+- *Gradient Optimization:* Logistic regression loss surfaces converge faster using gradient descent/lbfgs when features are centered and share similar variances.
+- *Regularization:* `LogisticRegression` includes L2 regularization by default. L2 penalizes variables with large magnitudes. Scaling puts all features on the same numerical scale, normalizing the L2 penalty evenly.
+- *Comparability:* Standardizing transforms coefficients into comparable feature importances.
 
 **Leakage Guard:** Standard scaling calculates `mean` and `std`. These must be `fitted` on `X_train` alone.
 """))
@@ -429,7 +436,7 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 5 (Feature Selection), Lecture 6 (Linear Models), Lecture 9 (Pipeline Discipline).*
 
-**Crucial Leakage Note:** Feature selection (analyzing variance, computing correlations) MUST be performed linearly on the **Training Set (`X_train`) only**. If we fit a VarianceThreshold or Correlation matrix on the entire pre-split dataset, we allow the statistical dynamics of the unseen test set to dictate which features our model learns from.
+**Leakage Note:** Feature selection (analyzing variance, computing correlations) must be performed on the **Training Set (`X_train`) only**. Fitting a VarianceThreshold or Correlation matrix on the entire pre-split dataset uses test set dynamics to dictate which features the model learns from.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -469,21 +476,40 @@ plt.tight_layout()
 plt.show()
 
 print("--- Highly Correlated Pairs (|corr| > 0.85) ---")
+corr_pairs = []
 for i in range(len(num_cols)):
-    for j in range(i+1, len(num_cols)):
-        if abs(corr_matrix.iloc[i, j]) > 0.85:
-            print(f"{num_cols[i]} & {num_cols[j]}: {corr_matrix.iloc[i, j]:.3f}")
+    for j in range(i + 1, len(num_cols)):
+        val = corr_matrix.iloc[i, j]
+        if abs(val) > 0.85:
+            corr_pairs.append((num_cols[i], num_cols[j], round(val, 4)))
+
+if corr_pairs:
+    for a, b, v in corr_pairs:
+        print(f"  {a} <-> {b}: {v}")
+else:
+    print("  No pairs exceed 0.85 on this dataset instance.")
+    print("  Note: On the real bank-additional.csv, euribor3m <-> emp.var.rate")
+    print("  and euribor3m <-> nr.employed exceed 0.90 (macroeconomic co-movement).")
 """))
 
-cells.append(nbf.v4.new_markdown_cell("""
-### 4c. Conceptual Feature Removal Discussion
+cells.append(nbf.v4.new_code_cell("""
+# Explicit feature selection decision
+# euribor3m and emp.var.rate are known to be highly collinear on real data.
+# Decision: retain all features. Justification: LogisticRegression with 
+# L2 (default C=1.0) penalizes inflated coefficients from collinear features,
+# reducing their effective weight without requiring manual removal.
+# Removing one arbitrarily would discard real predictive signal.
+# This decision is made using X_train statistics only.
 
-**Observations from Variance & Correlation:**
-- As shown manually above, `euribor3m` and `emp.var.rate` are extremely highly correlated (> 0.90). `euribor3m` and `nr.employed` also exhibit strong structural collinearity. This makes sense economically, as they all track identical macroeconomic phases.
-- `duration` was already dropped immediately during data loading due to catastrophic target leakage. No other features are conceptually problematic or represent future leakage.
-
-**Decision:**
-For Logistic Regression, severe multicollinearity can cause coefficient instability, stripping the weights of their interpretable meaning. However, `scikit-learn`'s `LogisticRegression` applies **L2 Regularization** by default. L2 inherently punishes inflated coefficients, securely spreading the penalty across correlated groups without crashing the math. Because the regularization natively mitigates the modeling risk, I chose to retain all macroeconomic variables to prevent arbitrary data deletion, but acknowledge interpretability of individual macroeconomic coefficients is compromised.
+features_to_drop = []  # No features removed after deliberate analysis
+if features_to_drop:
+    X_train = X_train.drop(columns=features_to_drop)
+    X_val   = X_val.drop(columns=features_to_drop)
+    X_test  = X_test.drop(columns=features_to_drop)
+    print(f"Dropped features: {features_to_drop}")
+else:
+    print("No features dropped. All features retained after variance and correlation analysis.")
+    print(f"Final training feature count: {X_train.shape[1]}")
 """))
 
 # ==========================================
@@ -494,17 +520,16 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 3 (Class Imbalance), Lecture 4 (Evaluation Metrics).*
 
-**Assessment:** The majority class is `no` (~89%). This extreme skew is a severe concern because a naive model could default to simply guessing "no" to achieve 89% accuracy, completely ignoring the minority class ("yes").
+**Assessment:** The majority class is `no` (~89%).
 
 **Strategy & Justification:**
-Because we are utilizing Logistic Regression, instead of synthesizing fake points via SMOTE (which risks geometric boundary distortion in high-dimensional one-hot setups), the mathematically elegant approach is to modify the algorithm's loss function via `class_weight='balanced'`. 
-This dynamically weights the loss gradients. A false negative (missing a 'yes') is penalized 9x more heavily than a false positive.
+`class_weight='balanced'` scales the loss contribution of each class inversely proportional to its frequency. For this dataset the minority class receives approximately 9x the weight of the majority class.
 
 **Implication if done before splitting (Leakage):**
-If we ran an oversampler like SMOTE on the *entire* dataset before splitting, overlapping synthetic examples would bleed directly into the Validation and Test sets. Our evaluation metrics would evaluate the model on fabricated data that already contains the training set's patterns, causing massively inflated scores that collapse in reality.
+If an oversampler like SMOTE were run on the entire dataset before splitting, synthetic examples would bleed into the Validation and Test sets.
 
 **Evaluation Metric Selection:**
-Because of the imbalance, raw `Accuracy` is misleading. We will focus our evaluation heavily on `Precision` and `Recall` of the positive class ("yes"), as these measure performance exclusively on the target demographic.
+Because of the imbalance, raw `Accuracy` is misleading. Evaluation focuses on `Precision` and `Recall` of the positive class ("yes"), as these measure performance on the target demographic.
 """))
 
 # ==========================================
@@ -515,7 +540,7 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 6 (Logistic Regression), Lecture 9–11 (Model Evaluation and Metrics).*
 
-We assemble the final `Pipeline`, assuring that `X_val` is never `fitted`, only `transformed` and `predicted`.
+The final `Pipeline` is assembled ensuring `X_val` is only `transformed` and `predicted`, never `fitted`.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -555,30 +580,25 @@ disp = ConfusionMatrixDisplay.from_predictions(
 plt.title('Validation Confusion Matrix\\n(Realistic Pipeline)')
 plt.show()
 
-# --- Accuracy Comparison Plot ---
-fig_acc, ax_acc = plt.subplots(figsize=(6, 4))
-bars = ax_acc.bar(['Logistic Regression', 'Zero-Rule Baseline'], [acc, acc_base], color=['#2ca02c', '#d62728'])
-ax_acc.set_ylim(0, 1)
-ax_acc.set_ylabel('Accuracy')
-ax_acc.set_title('Accuracy Comparison')
-
-# Add text labels
-for bar in bars:
-    yval = bar.get_height()
-    ax_acc.text(bar.get_x() + bar.get_width()/2, yval + 0.02, f'{yval:.4f}', ha='center', va='bottom', fontweight='bold')
-
+fig2, ax2 = plt.subplots(figsize=(6, 4))
+labels = ['Logistic Regression', 'Zero-Rule Baseline']
+values = [acc, acc_base]
+colors = ['#1f77b4', '#d62728']
+bars = ax2.bar(labels, values, color=colors, width=0.4)
+ax2.set_ylim(0, 1.0)
+ax2.set_ylabel('Accuracy')
+ax2.set_title('Validation Accuracy vs Zero-Rule Baseline')
+for bar, val in zip(bars, values):
+    ax2.text(bar.get_x() + bar.get_width() / 2,
+             bar.get_height() + 0.01,
+             f'{val:.4f}', ha='center', va='bottom', fontsize=11)
 plt.tight_layout()
 plt.show()
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""
 **Interpretation:**
-By heavily weighting the minority class (`class_weight='balanced'`), our Overall Accuracy has dropped significantly below the Zero-Rule Baseline (which lazily predicts "no" for everything and achieves ~89% artificial accuracy). 
-
-However, **this is intentional and mathematically correct**. 
-Instead of missing every single prospective client, the model now demonstrates strong *Recall*, capturing a massive segment of true subscribers ("yes"). 
-
-In a marketing context, missing a willing subscriber (a false negative) is much more costly long-term than calling an unwilling one (a false positive). High recall at the cost of precision is the correct tradeoff here, proving our pipeline and structural decisions capture underlying variance rather than lazily chasing an inflated accuracy score!
+Accuracy falls below the zero-rule baseline because the model now predicts 'yes' for borderline cases rather than defaulting to 'no'. Recall increases as a result. In a direct marketing context, the cost of a false negative (missed subscriber) typically exceeds the cost of a false positive (unnecessary call), which justifies this tradeoff.
 """))
 
 # ==========================================
@@ -591,9 +611,9 @@ cells.append(nbf.v4.new_markdown_cell("""
 - **Moro, S., Laureano, R., & Cortez, P. (2011).** Using Data Mining for Bank Direct Marketing: An Application of the CRISP-DM Methodology. *Proceedings of the European Simulation and Modelling Conference - ESM'2011*.
 
 **Key Preprocessing Notes Specific to this Dataset:**
-- `duration` is fundamentally a leakage risk because its value is not known before the call is performed. Therefore, it has been strictly excluded from this notebook to prevent data leakage, and no benchmark runs including it were performed.
-- `pdays=999` strictly means the client was not previously contacted. Instead of treating this as a massive numerical outlier (999 days), we explicitly convert it to an indicator flag and replace the 999 values with standard missing values (`NaN`).
-- Implicit missing categorical values in the UCI dataset are coded exclusively as the string `"unknown"`.
+- `duration` is excluded from this notebook to prevent data leakage.
+- `pdays=999` indicates the client was not previously contacted. This is converted to an indicator flag, and the 999 values are replaced with `NaN`.
+- Missing categorical values are coded as `"unknown"`.
 """))
 
 nb.cells.extend(cells)
