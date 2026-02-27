@@ -62,7 +62,17 @@ We load the dataset `bank-additional.csv`. Note that UCI bank datasets commonly 
 
 cells.append(nbf.v4.new_code_cell("""
 # Load dataset
-df = pd.read_csv('data/bank-additional.csv', sep=';')
+import os
+
+filepath = 'data/bank-additional.csv'
+github_url = 'https://raw.githubusercontent.com/christophrrrrr/ML-fundamentals-2026/main/data/bank-additional.csv'
+
+# Make it completely compatible with Google Colab or isolated executions
+if os.path.exists(filepath):
+    df = pd.read_csv(filepath, sep=';')
+else:
+    print(f"Local instance of dataset not found. Downloading directly from GitHub repository...")
+    df = pd.read_csv(github_url, sep=';')
 
 # Basic structure
 print(f"Number of observations: {df.shape[0]}")
