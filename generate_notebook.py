@@ -451,8 +451,8 @@ cells.append(nbf.v4.new_markdown_cell("""
 - **Moro, S., Laureano, R., & Cortez, P. (2011).** Using Data Mining for Bank Direct Marketing: An Application of the CRISP-DM Methodology. *Proceedings of the European Simulation and Modelling Conference - ESM'2011*.
 
 **Key Preprocessing Notes Specific to this Dataset:**
-- `duration` is fundamentally a leakage risk because its value is not known before the call is performed (we only use it for ablation benchmarks, not standard modeling).
-- `pdays=999` strictly means the client was "not previously contacted" rather than an extremely high number of days, requiring manual conversion to structural missingness (`NaN`) before scaling.
+- `duration` is fundamentally a leakage risk because its value is not known before the call is performed. Therefore, it has been strictly excluded from this notebook to prevent data leakage, and no benchmark runs including it were performed.
+- `pdays=999` strictly means the client was not previously contacted. Instead of treating this as a massive numerical outlier (999 days), we explicitly convert it to an indicator flag and replace the 999 values with standard missing values (`NaN`).
 - Implicit missing categorical values in the UCI dataset are coded exclusively as the string `"unknown"`.
 """))
 
