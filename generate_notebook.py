@@ -96,9 +96,17 @@ display(df.describe())
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""
-**Variable Identification:**
-- **Numerical:** `age`, `duration`, `campaign`, `pdays`, `previous`, `emp.var.rate`, `cons.price.idx`, `cons.conf.idx`, `euribor3m`, `nr.employed`
-- **Categorical:** `job`, `marital`, `education`, `default`, `housing`, `loan`, `contact`, `month`, `day_of_week`, `poutcome`, `y`
+**Variable Identification (raw dataset, prior to feature engineering):**
+- **Numerical:** `age`, `duration`, `campaign`, `pdays`, `previous`,
+  `emp.var.rate`, `cons.price.idx`, `cons.conf.idx`, `euribor3m`,
+  `nr.employed`
+- **Categorical:** `job`, `marital`, `education`, `default`, `housing`,
+  `loan`, `contact`, `month`, `day_of_week`, `poutcome`, `y`
+
+Note: `duration` is identified here for completeness but is dropped
+immediately in the next section due to target leakage. `pdays` is
+replaced by two engineered features (`prev_contacted`, `pdays_clean`)
+that separate its binary and continuous information.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -216,7 +224,15 @@ To prevent data leakage, data preparation tasks are executed in the following se
 If Feature Scaling is performed before Data Splitting, the mean and standard deviation are calculated across the entire dataset. The standardized test values inherently contain information about the central tendency of the training set. This is data leakage.
 
 **Incorrect Ordering Example 2 — Resampling before splitting:**
-If SMOTE were applied to the full dataset before the train/val/test split, synthetic minority samples would be generated from the entire data distribution. When the dataset is subsequently split, some synthetic samples — which were constructed using information from observations that end up in the validation or test sets — will appear in the training set. The model effectively trains on data derived from the test set. Validation and test metrics will be inflated because the boundary between training and evaluation data has been contaminated. The correct position for any resampling operation is after splitting, applied to the training set only.
+If SMOTE were applied to the full dataset before the train/val/test split,
+synthetic minority samples would be generated using the entire data
+distribution. When the dataset is subsequently split, some synthetic
+samples — constructed using observations that end up in the validation or
+test sets — will appear in the training set. The model trains on data
+derived from the test set. Validation and test metrics will be inflated
+because the boundary between training and evaluation data has been
+contaminated. The correct position for any resampling operation is after
+splitting, applied to the training set only.
 """))
 
 # ==========================================
@@ -531,7 +547,16 @@ SMOTE generates synthetic minority samples by interpolating between existing min
 If an oversampler like SMOTE were run on the entire dataset before splitting, synthetic examples would bleed into the Validation and Test sets.
 
 **Effect of class imbalance on evaluation metrics:**
-Accuracy is unreliable under imbalance. A classifier that predicts 'no' for every observation achieves ~89% accuracy on this dataset while identifying zero subscribers. Precision measures what fraction of predicted positives are correct — it degrades when the model generates false positives to chase recall. Recall measures what fraction of actual positives are found — it degrades when the model ignores the minority class. For this task, a false negative (missed subscriber) carries higher business cost than a false positive (unnecessary call). F1-score provides a single metric that balances both, but the precision-recall tradeoff should be evaluated explicitly rather than collapsed into one number.
+Accuracy is unreliable under imbalance. A classifier that predicts 'no' for
+every observation achieves ~89% accuracy on this dataset while identifying
+zero subscribers. Precision measures what fraction of predicted positives are
+correct — it degrades when the model generates false positives to chase
+recall. Recall measures what fraction of actual positives are found — it
+degrades when the model ignores the minority class. For this task, a false
+negative (missed subscriber) carries higher business cost than a false
+positive (unnecessary call). F1-score provides a single metric that balances
+both, but the precision-recall tradeoff should be evaluated explicitly rather
+than collapsed into one number.
 """))
 
 cells.append(nbf.v4.new_code_cell("""
@@ -612,6 +637,10 @@ plt.show()
 cells.append(nbf.v4.new_markdown_cell("""
 **Interpretation:**
 Accuracy falls below the zero-rule baseline because the model now predicts 'yes' for borderline cases rather than defaulting to 'no'. Recall increases as a result. In a direct marketing context, the cost of a false negative (missed subscriber) typically exceeds the cost of a false positive (unnecessary call), which justifies this tradeoff.
+This outcome is a direct consequence of the class_weight='balanced'
+decision made in Section 10 — the pipeline sections form a coherent
+chain: imbalance identified, loss reweighted, evaluation interpreted
+accordingly.
 """))
 
 # ==========================================
