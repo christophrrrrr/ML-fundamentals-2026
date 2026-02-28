@@ -10,7 +10,7 @@ cells.append(nbf.v4.new_markdown_cell("""
 # Individual Assignment I: Machine Learning Foundation
 **Data Preparation**
 
-GitHub Repository: [https://github.com/christophrrrrr/ML-fundamentals-2026.git](https://github.com/christophrrrrr/ML-fundamentals-2026.git)
+GitHub Repository: [https://github.com/christophrrrrr/ML-fundamentals-2026](https://github.com/christophrrrrr/ML-fundamentals-2026)
 *(Note: Repository name must be exactly `ML-fundamentals-2026` per assignment instructions)*
 
 This notebook executes data preparation and feature engineering tasks for the UCI Bank Marketing Dataset (`bank-additional.csv`), adhering to data leakage prevention principles.
@@ -48,7 +48,7 @@ The target variable is `y`. `y` records `"yes"` or `"no"` indicating whether the
 **Invalid Alternatives:**
 Three other variables might appear to be valid targets but must not be used:
 1. `duration`: This represents the call duration in seconds. While highly correlated with `y`, it is an outcome of the call. At prediction time (before or during the start of the call), this information is unavailable. Predicting `duration` does not address the business goal of identifying who will subscribe. Including it results in data leakage.
-2. `poutcome`: This records the outcome of the previous marketing campaign. It is a descriptor of a past event rather than the current campaign's outcome. Because it is known at prediction time, it serves as an input feature, not the target to predict.
+2. `poutcome`: Records the result of the previous marketing campaign. The prediction objective defined for this assignment is whether the client subscribes in the current campaign. `poutcome` describes an event that has already occurred and is available as an input at prediction time — it is an input feature, not the target. Using it as a prediction target would mean predicting something already known, which has no operational value.
 3. `campaign`: Records the number of contacts performed during the current campaign. One might argue this represents campaign effort worth predicting or optimizing. However, `campaign` is a campaign execution variable accumulated during the contact process — it is not the business outcome. The goal is predicting client behavior (`y`), not the number of calls made. It is also partially available at prediction time (current call count), making its use as a target conceptually incoherent.
 """))
 
@@ -154,20 +154,19 @@ print(y_pct)
 """))
 
 cells.append(nbf.v4.new_markdown_cell("""
-**Macroeconomic Observations:**
-- `euribor3m` and `nr.employed` show bimodal distributions, clustering into two distinct regimes that likely correspond to pre- and post-2008 economic periods in the dataset.
-- `emp.var.rate` is similarly clustered rather than continuous, reinforcing that macroeconomic features track the same underlying economic cycle.
-- These distributions suggest the macroeconomic block may carry redundant information — addressed formally in Feature Selection.
-"""))
-
-cells.append(nbf.v4.new_markdown_cell("""
 **General Observations:**
 - **Class Imbalance:** Only ~10.9% of clients subscribed (`yes`). Class imbalance handling is required to prevent the model from trivializing predictions.
 - **Skewed Variables:** `campaign` is right-skewed (most clients are contacted 1-3 times, with a long tail). `previous` is zero for the majority of clients.
 - **Category Ratios:** `university.degree` and `high.school` represent the most frequent `education` levels. The majority of clients are married.
 - **Target Leakage Variable:** `duration` is only known after the call finishes. It must be dropped.
-- **Campaign Skew:** `campaign` possesses a right tail requiring regularization.
 - **Implicit Missing Values:** Categorical variables utilize `"unknown"` as an implicit missing value. `pdays` uses `999` to indicate "never contacted before".
+"""))
+
+cells.append(nbf.v4.new_markdown_cell("""
+**Macroeconomic Observations:**
+- `euribor3m` and `nr.employed` show bimodal distributions, clustering into two distinct regimes that likely correspond to pre- and post-2008 economic periods in the dataset.
+- `emp.var.rate` is similarly clustered rather than continuous, reinforcing that macroeconomic features track the same underlying economic cycle.
+- These distributions suggest the macroeconomic block may carry redundant information — addressed formally in Feature Selection.
 """))
 
 # ==========================================
@@ -216,8 +215,8 @@ To prevent data leakage, data preparation tasks are executed in the following se
 **Incorrect Ordering Example (Scaling before Splitting):** 
 If Feature Scaling is performed before Data Splitting, the mean and standard deviation are calculated across the entire dataset. The standardized test values inherently contain information about the central tendency of the training set. This is data leakage.
 
-**Incorrect Ordering Example (SMOTE before Splitting):**
-If resampling like SMOTE is applied before splitting, synthetic minority samples generated from training points overlap with validation and test set spaces.
+**Incorrect Ordering Example 2 — Resampling before splitting:**
+If SMOTE were applied to the full dataset before the train/val/test split, synthetic minority samples would be generated from the entire data distribution. When the dataset is subsequently split, some synthetic samples — which were constructed using information from observations that end up in the validation or test sets — will appear in the training set. The model effectively trains on data derived from the test set. Validation and test metrics will be inflated because the boundary between training and evaluation data has been contaminated. The correct position for any resampling operation is after splitting, applied to the training set only.
 """))
 
 # ==========================================
@@ -239,6 +238,10 @@ We must convert these implicit symbols into standard structural missingness (`Na
 """))
 
 cells.append(nbf.v4.new_code_cell("""
+# Drop 'duration' immediately to prevent leakage before any further inspection
+if 'duration' in df.columns:
+    df = df.drop(columns=['duration'])
+
 # Count categorical 'unknown' and numerical '999' before cleaning
 missing_counts = []
 
@@ -265,10 +268,6 @@ display(missing_df)
 """))
 
 cells.append(nbf.v4.new_code_cell("""
-# Drop 'duration' immediately to avoid leakage
-if 'duration' in df.columns:
-    df = df.drop(columns=['duration'])
-
 # 1. Handle Categorical 'unknown'
 cat_cols = df.select_dtypes(include=['object']).columns
 for col in cat_cols:
@@ -520,16 +519,30 @@ cells.append(nbf.v4.new_markdown_cell("""
 
 *Lecture material: Lecture 3 (Class Imbalance), Lecture 4 (Evaluation Metrics).*
 
+**Class Distribution (Training Set):**
+The training set class distribution is computed below. Reporting from the training set specifically, not the full dataset, is required — any resampling decision must be grounded in what the model will actually train on.
+
 **Assessment:** The majority class is `no` (~89%).
 
-**Strategy & Justification:**
-`class_weight='balanced'` scales the loss contribution of each class inversely proportional to its frequency. For this dataset the minority class receives approximately 9x the weight of the majority class.
+**Why class_weight='balanced' over SMOTE:**
+SMOTE generates synthetic minority samples by interpolating between existing minority observations in feature space. After One-Hot Encoding, the feature space is high-dimensional and sparse — interpolating between binary indicator vectors does not produce meaningful intermediate points. class_weight='balanced' avoids this by reweighting the loss function directly, requiring no synthetic data generation and introducing no geometric assumptions about the feature space.
 
 **Implication if done before splitting (Leakage):**
 If an oversampler like SMOTE were run on the entire dataset before splitting, synthetic examples would bleed into the Validation and Test sets.
 
-**Evaluation Metric Selection:**
-Because of the imbalance, raw `Accuracy` is misleading. Evaluation focuses on `Precision` and `Recall` of the positive class ("yes"), as these measure performance on the target demographic.
+**Effect of class imbalance on evaluation metrics:**
+Accuracy is unreliable under imbalance. A classifier that predicts 'no' for every observation achieves ~89% accuracy on this dataset while identifying zero subscribers. Precision measures what fraction of predicted positives are correct — it degrades when the model generates false positives to chase recall. Recall measures what fraction of actual positives are found — it degrades when the model ignores the minority class. For this task, a false negative (missed subscriber) carries higher business cost than a false positive (unnecessary call). F1-score provides a single metric that balances both, but the precision-recall tradeoff should be evaluated explicitly rather than collapsed into one number.
+"""))
+
+cells.append(nbf.v4.new_code_cell("""
+train_class_dist = y_train.value_counts()
+train_class_pct  = y_train.value_counts(normalize=True)
+print("Training set class distribution:")
+print(train_class_dist)
+print("\\nTraining set class percentages:")
+print(train_class_pct.round(4))
+minority_ratio = train_class_dist.min() / train_class_dist.max()
+print(f"\\nMinority-to-majority ratio: {minority_ratio:.4f}")
 """))
 
 # ==========================================
